@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>200× Zoom Camera</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #fff;
+  }
+
+  #app {
+    width: 100%;
+    max-width: 480px;
+    height: 100vh;
+    margin: 0 auto;
+    background: #0a0a0a;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* ── VIEWFINDER ── */
+  #viewfinder {
+    position: relative;
+    width: 100%;
+    flex: 1;
+    background: #111;
+    overflow: hidden;
+    min-height: 0;
+  }
+  #video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transform-origin: center center;
+    will-change: transform;
+    transition: transform 0.08s ease-out;
+  }
+  #canvas { display: none; }
+
+  /* corner brackets */
+  .corner {
+    position: absolute;
+    width: 26px; height: 26px;
+    border-color: rgba(255,255,255,0.65);
+    border-style: solid;
+    border-width: 0;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .corner.tl { top: 18px; left: 18px; border-top-width: 2px; border-left-width: 2px; }
+  .corner.tr { top: 18px; right: 18px; border-top-width: 2px; border-right-width: 2px; }
+  .corner.bl { bottom: 18px; left: 18px; border-bottom-width: 2px; border-left-width: 2px; }
+  .corner.br { bottom: 18px; right: 18px; border-bottom-width: 2px; border-right-width: 2px; }
+
+  /* crosshair */
+  #crosshair {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 32px; height: 32px;
+    pointer-events: none;
+    z-index: 5;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.45);
+  }
+  #crosshair::before { width: 100%; height: 1px; top: 50%; left: 0; }
+  #crosshair::after  { width: 1px; height: 100%; left: 50%; top: 0; }
+
+  /* zoom badge top-center */
+  #zoom-badge {
+    position: absolute;
+    top: 16px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.18);
+    backdrop-filter: blur(6px);
+    border-radius: 20px;
+    padding: 4px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: #FFD600;
+    z-index: 6;
+    pointer-events: none;
+  }
+
+  /* REC badge */
+  #rec-badge {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: rgba(255,45,45,0.85);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    display: none;
+    align-items: center;
+    gap: 5px;
+    z-index: 6;
+  }
+  #rec-badge .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #fff;
+    animation: blink 1s infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+  /* timer top-left */
+  #rec-timer {
+    position: absolute;
+    top: 16px; left: 16px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #ff3b30;
+    letter-spacing: 1px;
+    display: none;
+    z-index: 6;
+    pointer-events: none;
+  }
+
+  /* no-camera overlay */
+  #no-cam {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    background: #111;
+    text-align: center;
+    padding: 24px;
+    z-index: 10;
+  }
+  #no-cam i { font-size: 52px; color: #444; }
+  #no-cam p  { color: #888; font-size: 14px; line-height: 1.6; max-width: 240px; }
+  #start-btn {
+    background: #FFD600; color: #000;
+    border: none; border-radius: 28px;
+    padding: 13px 30px;
+    font-size: 15px; font-weight: 700;
+    cursor: pointer; margin-top: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* focus ring tap feedback */
+  #focus-ring {
+    position: absolute;
+    width: 64px; height: 64px;
+    border: 2px solid #FFD600;
+    border-radius: 50%;
+    pointer-events: none;
+    display: none;
+    z-index: 7;
+    transform: translate(-50%, -50%);
+    animation: focusPop 0.5s ease-out forwards;
+  }
+  @keyframes focusPop {
+    0%   { opacity:1; width:80px; height:80px; }
+    100% { opacity:0; width:60px; height:60px; }
+  }
+
+  /* ── BOTTOM PANEL ── */
+  #panel {
+    background: #0a0a0a;
+    padding: 12px 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  /* zoom strip */
+  #zoom-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #zoom-strip label { font-size: 11px; color: #666; min-width: 26px; text-align: center; }
+  #zoom-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: #222;
+    outline: none;
+    cursor: pointer;
+    position: relative;
+  }
+  #zoom-slider::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #FFD600 0%, #FFD600 var(--pct,0%), #2a2a2a var(--pct,0%), #2a2a2a 100%);
+    height: 4px; border-radius: 2px;
+  }
+  #zoom-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #FFD600;
+    border: 3px solid #000;
+    cursor: pointer;
+    margin-top: -9px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+  #zoom-slider::-moz-range-thumb {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #FFD600;
+    border: 3px solid #000;
+    cursor: pointer;
+  }
+
+  /* preset buttons */
+  #presets {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .pbt {
+    background: #1c1c1c;
+    color: #aaa;
+    border: 1px solid #2a2a2a;
+    border-radius: 22px;
+    padding: 5px 13px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    letter-spacing: 0.3px;
+  }
+  .pbt.on { background: #FFD600; color: #000; border-color: #FFD600; }
+
+  /* mode toggle */
+  #mode-toggle {
+    display: flex;
+    background: #181818;
+    border-radius: 28px;
+    padding: 4px;
+    gap: 0;
+  }
+  .mbt {
+    flex: 1; background: transparent; border: none;
+    border-radius: 24px; padding: 9px 0;
+    font-size: 13px; font-weight: 600;
+    color: #666; cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+  }
+  .mbt.on { background: #fff; color: #000; }
+
+  /* action row */
+  #action-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0 2px;
+  }
+
+  /* gallery thumb */
+  #gallery-btn {
+    width: 56px; height: 56px;
+    border-radius: 12px;
+    background: #1c1c1c;
+    border: 1px solid #2a2a2a;
+    overflow: hidden;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  #gallery-btn img { width: 100%; height: 100%; object-fit: cover; display: none; }
+  #gallery-btn i { font-size: 24px; color: #555; }
+
+  /* shutter */
+  #shutter {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    background: #fff;
+    border: 4px solid #555;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.1s, background 0.15s;
+    flex-shrink: 0;
+    position: relative;
+  }
+  #shutter:active { transform: scale(0.92); }
+  #shutter.rec { background: #ff3b30; border-color: #ff3b30; }
+  #shutter-inner {
+    width: 58px; height: 58px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid #bbb;
+    transition: border-radius 0.22s, background 0.15s;
+  }
+  #shutter.rec #shutter-inner { border-radius: 10px; background: #ff3b30; border-color: transparent; }
+
+  /* flip */
+  #flip-btn {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: #1c1c1c;
+    border: 1px solid #2a2a2a;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; color: #ccc;
+    transition: transform 0.3s;
+    flex-shrink: 0;
+  }
+  #flip-btn:active { transform: rotate(180deg); }
+
+  /* ── TOAST ── */
+  #toast {
+    position: fixed;
+    bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: rgba(20,20,20,0.95);
+    border: 1px solid #333;
+    border-radius: 28px;
+    padding: 11px 22px;
+    font-size: 13px; color: #fff;
+    transition: transform 0.3s cubic-bezier(.34,1.56,.64,1);
+    z-index: 999;
+    white-space: nowrap;
+    display: flex; align-items: center; gap: 8px;
+    pointer-events: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast i { font-size: 16px; color: #4CD964; }
+
+  /* flash overlay */
+  #flash {
+    position: absolute; inset: 0;
+    background: #fff; opacity: 0;
+    pointer-events: none; z-index: 8;
+    transition: opacity 0.35s;
+  }
+
+  /* ── GALLERY MODAL ── */
+  #gallery-modal {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.97);
+    z-index: 500;
+    flex-direction: column;
+  }
+  #gallery-modal.open { display: flex; }
+  #gal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #1e1e1e;
+    flex-shrink: 0;
+  }
+  #gal-header span { font-size: 17px; font-weight: 700; }
+  #gal-close { background: none; border: none; color: #fff; font-size: 26px; cursor: pointer; line-height: 1; }
+  #gal-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    overflow-y: auto;
+    flex: 1;
+    padding: 2px;
+    align-content: start;
+  }
+  .gi {
+    aspect-ratio: 1; overflow: hidden;
+    position: relative; cursor: pointer; background: #111;
+  }
+  .gi img, .gi video { width: 100%; height: 100%; object-fit: cover; }
+  .gi .vbadge {
+    position: absolute; bottom: 5px; right: 5px;
+    background: rgba(0,0,0,0.65);
+    border-radius: 5px; padding: 2px 6px;
+    font-size: 10px; font-weight: 700;
+    color: #fff; letter-spacing: 0.5px;
+    display: flex; align-items: center; gap: 3px;
+  }
+  #gal-empty {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 12px; color: #444; font-size: 14px;
+  }
+  #gal-empty i { font-size: 44px; }
+
+  /* ── PREVIEW MODAL ── */
+  #prev-modal {
+    display: none;
+    position: fixed; inset: 0;
+    background: #000;
+    z-index: 600;
+    flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  #prev-modal.open { display: flex; }
+  #prev-back {
+    position: absolute; top: 16px; left: 16px;
+    background: rgba(255,255,255,0.12);
+    border: none; color: #fff; font-size: 22px;
+    cursor: pointer; border-radius: 50%;
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #prev-img  { max-width: 100%; max-height: 78vh; object-fit: contain; }
+  #prev-vid  { max-width: 100%; max-height: 78vh; display: none; }
+  #prev-time { position: absolute; top: 22px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #888; }
+  #prev-actions {
+    display: flex; gap: 12px; margin-top: 20px;
+    position: absolute; bottom: 30px;
+  }
+  .pa {
+    background: #1a1a1a; border: 1px solid #2e2e2e;
+    color: #fff; border-radius: 22px;
+    padding: 11px 22px; font-size: 13px;
+    cursor: pointer; display: flex; align-items: center; gap: 7px;
+    font-weight: 600;
+  }
+  .pa.del { border-color: #6b1a1a; color: #ff6b6b; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- VIEWFINDER -->
+  <div id="viewfinder">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="flash"></div>
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+    <div id="crosshair"></div>
+    <div id="zoom-badge">1×</div>
+    <div id="rec-badge"><div class="dot"></div> REC</div>
+    <div id="rec-timer">00:00</div>
+    <div id="focus-ring"></div>
+
+    <div id="no-cam">
+      <i class="ti ti-camera-off"></i>
+      <p>Allow camera access to use the 200× Zoom Camera.</p>
+      <button id="start-btn" onclick="startCamera()">
+        <i class="ti ti-camera"></i> Start Camera
+      </button>
+    </div>
+  </div>
+
+  <!-- BOTTOM PANEL -->
+  <div id="panel">
+    <div id="zoom-strip">
+      <label>1×</label>
+      <input type="range" id="zoom-slider" min="1" max="200" step="1" value="1">
+      <label>200×</label>
+    </div>
+
+    <div id="presets">
+      <button class="pbt on" data-z="1">1×</button>
+      <button class="pbt" data-z="2">2×</button>
+      <button class="pbt" data-z="5">5×</button>
+      <button class="pbt" data-z="10">10×</button>
+      <button class="pbt" data-z="25">25×</button>
+      <button class="pbt" data-z="50">50×</button>
+      <button class="pbt" data-z="100">100×</button>
+      <button class="pbt" data-z="200">200×</button>
+    </div>
+
+    <div id="mode-toggle">
+      <button class="mbt on" id="photo-mbt" onclick="setMode('photo')">
+        <i class="ti ti-camera"></i> Photo
+      </button>
+      <button class="mbt" id="video-mbt" onclick="setMode('video')">
+        <i class="ti ti-video"></i> Video
+      </button>
+    </div>
+
+    <div id="action-row">
+      <div id="gallery-btn" onclick="openGallery()">
+        <img id="gal-thumb" alt="last">
+        <i class="ti ti-photo" id="gal-icon"></i>
+      </div>
+      <div id="shutter" onclick="shutterPress()">
+        <div id="shutter-inner"></div>
+      </div>
+      <button id="flip-btn" onclick="flipCamera()">
+        <i class="ti ti-camera-rotate"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"><i class="ti ti-circle-check"></i><span id="toast-msg">Saved</span></div>
+
+<!-- GALLERY MODAL -->
+<div id="gallery-modal">
+  <div id="gal-header">
+    <span><i class="ti ti-photo" style="margin-right:6px;vertical-align:-2px"></i>Gallery (<span id="gal-count">0</span>)</span>
+    <button id="gal-close" onclick="closeGallery()"><i class="ti ti-x"></i></button>
+  </div>
+  <div id="gal-grid"></div>
+  <div id="gal-empty"><i class="ti ti-aperture"></i><span>No captures yet — take a photo or video!</span></div>
+</div>
+
+<!-- PREVIEW MODAL -->
+<div id="prev-modal">
+  <button id="prev-back" onclick="closePreview()"><i class="ti ti-arrow-left"></i></button>
+  <span id="prev-time"></span>
+  <img id="prev-img" alt="preview">
+  <video id="prev-vid" controls></video>
+  <div id="prev-actions">
+    <button class="pa" onclick="downloadItem()"><i class="ti ti-download"></i> Download</button>
+    <button class="pa del" onclick="deleteItem()"><i class="ti ti-trash"></i> Delete</button>
+  </div>
+</div>
+
+<script>
+  'use strict';
+
+  /* ─── STATE ─── */
+  let stream = null;
+  let facing = 'environment';
+  let zoom = 1;
+  let mode = 'photo';
+  let mediaRecorder = null;
+  let recChunks = [];
+  let isRecording = false;
+  let recSecs = 0;
+  let recInterval = null;
+  let gallery = [];
+  let previewIdx = -1;
+
+  /* ─── ELEMENTS ─── */
+  const video       = document.getElementById('video');
+  const canvas      = document.getElementById('canvas');
+  const noCam       = document.getElementById('no-cam');
+  const flash       = document.getElementById('flash');
+  const zoomBadge   = document.getElementById('zoom-badge');
+  const zoomSlider  = document.getElementById('zoom-slider');
+  const recBadge    = document.getElementById('rec-badge');
+  const recTimer    = document.getElementById('rec-timer');
+  const shutter     = document.getElementById('shutter');
+  const galThumb    = document.getElementById('gal-thumb');
+  const galIcon     = document.getElementById('gal-icon');
+  const galModal    = document.getElementById('gallery-modal');
+  const galGrid     = document.getElementById('gal-grid');
+  const galEmpty    = document.getElementById('gal-empty');
+  const galCount    = document.getElementById('gal-count');
+  const prevModal   = document.getElementById('prev-modal');
+  const prevImg     = document.getElementById('prev-img');
+  const prevVid     = document.getElementById('prev-vid');
+  const prevTime    = document.getElementById('prev-time');
+  const focusRing   = document.getElementById('focus-ring');
+
+  /* ─── CAMERA ─── */
+  async function startCamera() {
+    try {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facing, width: { ideal: 3840 }, height: { ideal: 2160 } },
+        audio: true
+      });
+      video.srcObject = stream;
+      noCam.style.display = 'none';
+      applyZoom(zoom);
+    } catch (e) {
+      noCam.querySelector('p').textContent =
+        'Camera access denied or unavailable. Please allow camera permission and try again.';
+    }
+  }
+
+  async function flipCamera() {
+    facing = facing === 'environment' ? 'user' : 'environment';
+    await startCamera();
+    document.getElementById('flip-btn').style.transform = 'rotate(360deg)';
+    setTimeout(() => document.getElementById('flip-btn').style.transform = '', 400);
+  }
+
+  /* ─── ZOOM ─── */
+  function applyZoom(z) {
+    zoom = Math.max(1, Math.min(200, Math.round(z)));
+    video.style.transform = `scale(${zoom})`;
+    zoomBadge.textContent = zoom + '×';
+    zoomSlider.value = zoom;
+    const pct = ((zoom - 1) / 199 * 100).toFixed(2);
+    zoomSlider.style.setProperty('--pct', pct + '%');
+    document.querySelectorAll('.pbt').forEach(b => {
+      b.classList.toggle('on', parseInt(b.dataset.z) === zoom);
+    });
+    // native zoom if supported
+    if (stream) {
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        if (caps.zoom) {
+          const nativeZ = Math.min(zoom, caps.zoom.max);
+          track.applyConstraints({ advanced: [{ zoom: nativeZ }] }).catch(() => {});
+        }
+      }
+    }
+  }
+
+  function animateZoom(from, to) {
+    const steps = 22, dur = 350;
+    let step = 0;
+    const iv = setInterval(() => {
+      step++;
+      const t = step / steps;
+      const e = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
+      applyZoom(Math.round(from + (to - from) * e));
+      if (step >= steps) { clearInterval(iv); applyZoom(to); }
+    }, dur / steps);
+  }
+
+  zoomSlider.addEventListener('input', () => applyZoom(+zoomSlider.value));
+
+  document.querySelectorAll('.pbt').forEach(b => {
+    b.addEventListener('click', () => animateZoom(zoom, parseInt(b.dataset.z)));
+  });
+
+  /* pinch-to-zoom */
+  let pinchDist = null;
+  let pinchStartZoom = 1;
+  document.getElementById('viewfinder').addEventListener('touchstart', e => {
+    if (e.touches.length === 2) {
+      pinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      pinchStartZoom = zoom;
+    } else if (e.touches.length === 1) {
+      showFocusRing(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }, { passive: true });
+  document.getElementById('viewfinder').addEventListener('touchmove', e => {
+    if (e.touches.length === 2 && pinchDist !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      applyZoom(Math.round(pinchStartZoom * (dist / pinchDist)));
+    }
+  }, { passive: true });
+  document.getElementById('viewfinder').addEventListener('touchend', () => { pinchDist = null; });
+
+  function showFocusRing(x, y) {
+    const vf = document.getElementById('viewfinder').getBoundingClientRect();
+    focusRing.style.left = (x - vf.left) + 'px';
+    focusRing.style.top  = (y - vf.top)  + 'px';
+    focusRing.style.display = 'block';
+    focusRing.style.animation = 'none';
+    void focusRing.offsetWidth;
+    focusRing.style.animation = '';
+    clearTimeout(focusRing._t);
+    focusRing._t = setTimeout(() => { focusRing.style.display = 'none'; }, 600);
+  }
+
+  /* ─── MODE ─── */
+  function setMode(m) {
+    mode = m;
+    document.getElementById('photo-mbt').classList.toggle('on', m === 'photo');
+    document.getElementById('video-mbt').classList.toggle('on', m === 'video');
+    if (isRecording) stopRecording();
+  }
+
+  /* ─── SHUTTER ─── */
+  function shutterPress() {
+    if (!stream) { startCamera(); return; }
+    if (mode === 'photo') takePhoto();
+    else isRecording ? stopRecording() : startRecording();
+  }
+
+  /* ─── PHOTO ─── */
+  function takePhoto() {
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    const s = track.getSettings();
+    canvas.width  = s.width  || video.videoWidth;
+    canvas.height = s.height || video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    const sw = canvas.width  / zoom;
+    const sh = canvas.height / zoom;
+    const sx = (canvas.width  - sw) / 2;
+    const sy = (canvas.height - sh) / 2;
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.96);
+    addToGallery({ type: 'photo', src: dataUrl, zoom, time: timestamp() });
+    doFlash();
+    showToast('📸 Photo saved to gallery');
+  }
+
+  function doFlash() {
+    flash.style.opacity = '0.85';
+    setTimeout(() => { flash.style.opacity = '0'; }, 120);
+  }
+
+  /* ─── VIDEO ─── */
+  function startRecording() {
+    if (!stream) return;
+    recChunks = [];
+    let mime = 'video/webm;codecs=vp9,opus';
+    if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8,opus';
+    if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+    try { mediaRecorder = new MediaRecorder(stream, { mimeType: mime }); }
+    catch (e) { mediaRecorder = new MediaRecorder(stream); }
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
+    mediaRecorder.onstop = finishVideo;
+    mediaRecorder.start(200);
+    isRecording = true;
+    shutter.classList.add('rec');
+    recBadge.style.display = 'flex';
+    recSecs = 0; updateTimer();
+    recTimer.style.display = 'block';
+    recInterval = setInterval(() => { recSecs++; updateTimer(); }, 1000);
+  }
+
+  function updateTimer() {
+    const m = String(Math.floor(recSecs / 60)).padStart(2, '0');
+    const s = String(recSecs % 60).padStart(2, '0');
+    recTimer.textContent = m + ':' + s;
+  }
+
+  function stopRecording() {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      isRecording = false;
+      shutter.classList.remove('rec');
+      recBadge.style.display = 'none';
+      recTimer.style.display = 'none';
+      clearInterval(recInterval);
+    }
+  }
+
+  function finishVideo() {
+    const blob = new Blob(recChunks, { type: recChunks[0]?.type || 'video/webm' });
+    const url  = URL.createObjectURL(blob);
+    addToGallery({ type: 'video', src: url, blob, zoom, time: timestamp() });
+    showToast('🎥 Video saved to gallery');
+  }
+
+  /* ─── GALLERY STORE ─── */
+  function addToGallery(item) {
+    gallery.push(item);
+    galCount.textContent = gallery.length;
+    if (item.type === 'photo') {
+      galThumb.src = item.src;
+      galThumb.style.display = 'block';
+      galIcon.style.display = 'none';
+    } else {
+      galThumb.style.display = 'none';
+      galIcon.className = 'ti ti-video';
+      galIcon.style.display = '';
+    }
+  }
+
+  /* ─── GALLERY MODAL ─── */
+  function openGallery() {
+    galModal.classList.add('open');
+    renderGallery();
+  }
+  function closeGallery() { galModal.classList.remove('open'); }
+
+  function renderGallery() {
+    galGrid.innerHTML = '';
+    galEmpty.style.display = gallery.length ? 'none' : 'flex';
+    galGrid.style.display  = gallery.length ? 'grid'  : 'none';
+    gallery.forEach((item, i) => {
+      const div = document.createElement('div');
+      div.className = 'gi';
+      div.onclick = () => openPreview(i);
+      if (item.type === 'photo') {
+        const img = document.createElement('img');
+        img.src = item.src; img.alt = 'photo ' + (i+1);
+        div.appendChild(img);
+      } else {
+        const vid = document.createElement('video');
+        vid.src = item.src; vid.preload = 'metadata';
+        div.appendChild(vid);
+        const badge = document.createElement('div');
+        badge.className = 'vbadge';
+        badge.innerHTML = '<i class="ti ti-player-play" style="font-size:9px"></i> VID';
+        div.appendChild(badge);
+      }
+      galGrid.appendChild(div);
+    });
+  }
+
+  /* ─── PREVIEW MODAL ─── */
+  function openPreview(i) {
+    previewIdx = i;
+    const item = gallery[i];
+    prevTime.textContent = item.time + '  ·  ' + item.zoom + '× zoom';
+    if (item.type === 'photo') {
+      prevImg.src = item.src; prevImg.style.display = 'block';
+      prevVid.style.display = 'none'; prevVid.src = '';
+    } else {
+      prevVid.src = item.src; prevVid.style.display = 'block';
+      prevImg.style.display = 'none';
+    }
+    prevModal.classList.add('open');
+  }
+  function closePreview() { prevModal.classList.remove('open'); }
+
+  function downloadItem() {
+    if (previewIdx < 0) return;
+    const item = gallery[previewIdx];
+    const a = document.createElement('a');
+    a.href = item.src;
+    a.download = item.type === 'photo'
+      ? 'zoom_photo_' + Date.now() + '.jpg'
+      : 'zoom_video_' + Date.now() + '.webm';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast('⬇️ Download started');
+  }
+
+  function deleteItem() {
+    if (previewIdx < 0) return;
+    gallery.splice(previewIdx, 1);
+    closePreview();
+    galCount.textContent = gallery.length;
+    renderGallery();
+    if (gallery.length === 0) {
+      galThumb.style.display = 'none';
+      galIcon.className = 'ti ti-photo';
+      galIcon.style.display = '';
+    } else {
+      const last = gallery[gallery.length - 1];
+      if (last.type === 'photo') {
+        galThumb.src = last.src;
+        galThumb.style.display = 'block';
+        galIcon.style.display = 'none';
+      }
+    }
+    showToast('🗑 Deleted');
+  }
+
+  /* ─── TOAST ─── */
+  let toastTimer;
+  function showToast(msg) {
+    document.getElementById('toast-msg').textContent = msg;
+    const t = document.getElementById('toast');
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+
+  /* ─── UTILS ─── */
+  function timestamp() {
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  /* ─── INIT ─── */
+  startCamera();
+</script>
+</body>
+</html>
